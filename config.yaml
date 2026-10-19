@@ -1,0 +1,26 @@
+# ---- Paths ----
+chunks_file: data/chunks/chunks.jsonl  # teammate-provided chunks; set to null to use PDFs instead
+documents_dir: data/documents          # put the fintech's PDFs here
+tests_file: data/tests.xlsx            # MVB's test sheet (one test per row)
+output_file: output/results.xlsx
+log_file: output/run_log.jsonl         # raw model responses, for debugging
+answer_key: data/answer_key.csv
+rules_file: prompts/rules.txt
+
+# "today" for the 12-month document-date check. null = actual today.
+as_of_date: null                       # e.g. "2026-10-14"
+
+# ---- Model ----
+llm:
+  backend: ollama                      # ollama | mock  (mock = plumbing test only, NOT a real model)
+  model: llama3.1:8b                   # pick based on laptop RAM; swap freely and re-score
+  host: http://localhost:11434
+  temperature: 0
+  num_ctx: 16384                       # context window requested from Ollama
+  timeout_seconds: 300
+
+# ---- Evidence ----
+retrieval:
+  full_doc_char_limit: 24000           # if all of a test's documents fit under this, send them whole
+  top_k: 5                             # otherwise retrieve this many chunks per document
+  chunk_max_chars: 1500
