@@ -15,6 +15,26 @@ def load_rules(path):
     return "\n".join(l for l in Path(path).read_text(encoding="utf8").splitlines() if not l.lstrip().startswith("#"))
 
 
+def evaluate_tests(tests, docs, backend, rules, cfg, as_of, log=None):
+    """Evaluate every test and duration, preserving per-test error handling."""
+    results, durations = [], []
+    for test in tests:
+        start = datetime.now()
+        try:
+            result = run_test(test, docs, backend, rules, cfg, as_of, log)
+        except Exception as error:  # one bad test must not stop the run
+            from .verdict import Result
+            result = Result(
+                test.test_id,
+                "UNCLEAR",
+                f"Error while running this test: {error}",
+                mode="error",
+            )
+        results.append(result)
+        durations.append((datetime.now() - start).total_seconds())
+    return results, durations
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Run UC3 tests through the pipeline")
     ap.add_argument("--config", default="config.yaml")
@@ -48,17 +68,9 @@ def main(argv=None):
     print(f"Running {len(tests)} test(s) with {cfg['llm']['backend']}:{model_name}  (as-of {as_of})\n")
 
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    results = []
     with open(cfg["log_file"], "w", encoding="utf8") as log:
-        for t in tests:
-            start = datetime.now()
-            try:
-                r = run_test(t, docs, backend, rules, cfg, as_of, log)
-            except Exception as e:  # one bad test must not stop the run
-                from .verdict import Result
-                r = Result(t.test_id, "UNCLEAR", f"Error while running this test: {e}", mode="error")
-            secs = (datetime.now() - start).total_seconds()
-            results.append(r)
+        results, durations = evaluate_tests(tests, docs, backend, rules, cfg, as_of, log)
+        for t, r, secs in zip(tests, results, durations):
             flag = " [review]" if r.review_flag else ""
             print(f"{t.test_id:>4}  {r.verdict:<7} {r.mode:<14} {secs:5.1f}s{flag}  {r.reason[:80]}")
     write_results(load_sheet(cfg["tests_file"]), tests, results, out, model_name, as_of, cfg)
