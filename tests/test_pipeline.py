@@ -6,12 +6,23 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import yaml
+import pandas as pd
 
 from uc3.dates import months_between
 from uc3.documents import load_documents
 from uc3.llm import OllamaBackend
 from uc3.retrieve import retrieve
-from uc3.sheet import FILE_RE, Test, code_from_filename
+from uc3.run import evaluate_tests
+from uc3.sheet import (
+    FILE_RE,
+    Test,
+    code_from_filename,
+    recommend_tests,
+    select_tests,
+    sheet_rows_for_tests,
+    test_selector_categories,
+    test_selector_options,
+)
 from uc3.verdict import quote_in, norm, run_test
 
 CFG = yaml.safe_load(open("config.yaml", encoding="utf8"))
@@ -45,6 +56,90 @@ class SheetParsing(unittest.TestCase):
     def test_run_together_cell_is_split(self):
         cell = "SAN-001_Sanctions_Program.pdf, SAN002_Sanctions_Risk_Assessment.pdfSAN-001, SAN-002"
         self.assertEqual(FILE_RE.findall(cell), ["SAN-001_Sanctions_Program.pdf", "SAN002_Sanctions_Risk_Assessment.pdf"])
+
+    def test_selected_tests_and_workbook_rows_stay_aligned(self):
+        tests = [
+            Test("T1", "First", row=0),
+            Test("T2", "Second", row=1),
+            Test("T3", "Third", row=2),
+        ]
+        selected = select_tests(tests, ["t3", "T1"])
+        rows = sheet_rows_for_tests(
+            pd.DataFrame({"Test ID": ["T1", "T2", "T3"], "Other": ["a", "b", "c"]}),
+            selected,
+        )
+
+        self.assertEqual([test.test_id for test in selected], ["T1", "T3"])
+        self.assertEqual(rows["Test ID"].tolist(), ["T1", "T3"])
+
+    def test_test_selector_options_sort_and_label_by_category_and_requirement(self):
+        sheet = pd.DataFrame({
+            "Test Name": ["T2", "T1", "T3"],
+            "Document Types": ["Fraud", "Compliance", "Compliance"],
+            "Tests": ["Zulu requirement", "Beta requirement", "Alpha requirement"],
+        })
+        tests = [
+            Test("T2", "Zulu requirement", row=0),
+            Test("T1", "Beta requirement", row=1),
+            Test("T3", "Alpha requirement", row=2),
+        ]
+
+        options, labels = test_selector_options(sheet, tests)
+
+        self.assertEqual(options, ["T3", "T1", "T2"])
+        self.assertEqual(labels["T3"], "Alpha requirement (T3)")
+
+    def test_test_selector_categories_group_and_deduplicate_categories(self):
+        sheet = pd.DataFrame({
+            "Test Name": ["T1", "T2", "T3", "T4"],
+            "Document Types": [
+                "ACH Compliance Policy",
+                "Fraud Program Documentation, Fraud Program Documentation",
+                "",
+                "AML Program Documentation, Transaction Monitoring Documentation",
+            ],
+            "Tests": ["First", "Second", "Third", "Fourth"],
+        })
+        tests = [
+            Test("T1", "First", row=0),
+            Test("T2", "Second", row=1),
+            Test("T3", "Third", row=2),
+            Test("T4", "Fourth", row=3),
+        ]
+
+        categories = test_selector_categories(sheet, tests)
+
+        self.assertEqual(
+            list(categories),
+            [
+                "ACH Compliance Policy",
+                "AML Program Documentation",
+                "Fraud Program Documentation",
+                "Transaction Monitoring Documentation",
+                "Uncategorized",
+            ],
+        )
+        self.assertEqual(categories["ACH Compliance Policy"], ["T1"])
+        self.assertEqual(categories["Fraud Program Documentation"], ["T2"])
+        self.assertEqual(categories["AML Program Documentation"], ["T4"])
+        self.assertEqual(categories["Transaction Monitoring Documentation"], ["T4"])
+
+    def test_test_recommendations_match_uploaded_codes_and_available_documents(self):
+        tests = [
+            Test("T1", "single uploaded doc", codes=["POL-001"]),
+            Test("T2", "both docs uploaded", codes=["POL-001", "POL-002"]),
+            Test("T3", "required doc missing", codes=["POL-001", "POL-003"]),
+            Test("T4", "unrelated doc", codes=["POL-004"]),
+            Test("T5", "no mapped document", codes=[]),
+        ]
+
+        recommendations = recommend_tests(
+            tests,
+            uploaded_codes=["POL-001"],
+            available_codes=["POL-001", "POL-002", "POL-004"],
+        )
+
+        self.assertEqual([test.test_id for test in recommendations], ["T1", "T2"])
 
 
 class Documents(unittest.TestCase):
@@ -118,6 +213,22 @@ class RunTest(unittest.TestCase):
         b = FakeBackend({"verdict": "FAIL", "reason": "searched for OT/SCADA, nothing found", "citations": []})
         r = run_test(T("T52", "Policy addresses industrial control systems (OT/SCADA) security."), DOCS, b, RULES, CFG, AS_OF)
         self.assertEqual(r.verdict, "FAIL")
+
+    def test_batch_evaluator_keeps_running_after_a_test_error(self):
+        class BrokenBackend:
+            def chat(self, *args):
+                raise RuntimeError("model unavailable")
+
+        tests = [
+            T("T37", "There were no major nonconformities identified during the audit."),
+            T("T38", "The provided document version was created or reviewed within the last 12 months."),
+        ]
+        results, durations = evaluate_tests(tests, DOCS, BrokenBackend(), RULES, CFG, AS_OF)
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual((results[0].verdict, results[0].mode), ("UNCLEAR", "error"))
+        self.assertEqual(results[1].mode, "date-check")
+        self.assertEqual(len(durations), 2)
 
 
 class OllamaPlumbing(unittest.TestCase):

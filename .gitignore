@@ -1,3 +1,15 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Client and internal review data
+/data/chunks/
+/data/documents/
+/data/tests.xlsx
+/data/answer_key.csv
+/output/
+~$*.xlsx
+
 # Logs
 logs
 *.log

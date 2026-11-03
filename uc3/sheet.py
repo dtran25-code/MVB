@@ -56,3 +56,78 @@ def load_tests(path):
         tests.append(Test(tid, str(r[c_text]).strip(), files, codes,
                           str(r[c_codes]).strip() if c_codes else "", i))
     return tests
+
+
+def select_tests(tests, test_ids):
+    """Keep requested tests in their original workbook order."""
+    wanted = {str(test_id).strip().upper() for test_id in test_ids}
+    return [test for test in tests if test.test_id.upper() in wanted]
+
+
+def test_selector_options(sheet_df, tests):
+    """Return test IDs sorted by category and requirement, with readable labels."""
+    columns = {str(column).strip().lower(): column for column in sheet_df.columns}
+    category_col = columns.get("document types") or columns.get("category")
+    name_col = next(
+        (columns[name] for name in ("tests", "test description", "requirement")
+         if name in columns),
+        None,
+    )
+    labels = {}
+    for test in tests:
+        row = sheet_df.iloc[test.row]
+        name = str(row[name_col]).strip() if name_col else ""
+        labels[test.test_id] = f"{name} ({test.test_id})" if name else test.test_id
+
+    ordered_tests = sorted(
+        tests,
+        key=lambda test: (
+            str(sheet_df.iloc[test.row][category_col]).strip().casefold()
+            if category_col else "",
+            str(sheet_df.iloc[test.row][name_col]).strip().casefold()
+            if name_col else "",
+            test.test_id.casefold(),
+        ),
+    )
+    return list(dict.fromkeys(test.test_id for test in ordered_tests)), labels
+
+
+def test_selector_categories(sheet_df, tests):
+    """Group test IDs under their workbook document-type categories."""
+    columns = {str(column).strip().lower(): column for column in sheet_df.columns}
+    category_col = columns.get("document types") or columns.get("category")
+    categories = {}
+    for test in tests:
+        category = (
+            str(sheet_df.iloc[test.row][category_col]).strip()
+            if category_col else ""
+        )
+        names = list(dict.fromkeys(
+            name.strip() for name in category.split(",") if name.strip()
+        )) or ["Uncategorized"]
+        for name in names:
+            categories.setdefault(name, []).append(test.test_id)
+    return {
+        category: list(dict.fromkeys(test_ids))
+        for category, test_ids in sorted(
+            categories.items(),
+            key=lambda item: item[0].casefold(),
+        )
+    }
+
+
+def recommend_tests(tests, uploaded_codes, available_codes):
+    """Recommend tests linked to uploads whose required documents are all available."""
+    uploaded = {str(code).strip().upper() for code in uploaded_codes}
+    available = {str(code).strip().upper() for code in available_codes}
+    return [
+        test for test in tests
+        if test.codes
+        and uploaded.intersection(test.codes)
+        and set(test.codes).issubset(available)
+    ]
+
+
+def sheet_rows_for_tests(sheet_df, tests):
+    """Return only the original workbook rows corresponding to selected tests."""
+    return sheet_df.iloc[[test.row for test in tests]].copy()
