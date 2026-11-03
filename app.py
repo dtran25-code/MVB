@@ -315,6 +315,19 @@ def _corpus_signature(documents):
     return digest.hexdigest()
 
 
+def _update_test_selection(test_id, checkbox_key, test_ids, selection_state_key, checkbox_keys):
+    selected = set(st.session_state[selection_state_key])
+    if st.session_state[checkbox_key]:
+        selected.add(test_id)
+    else:
+        selected.discard(test_id)
+    st.session_state[selection_state_key] = [
+        candidate for candidate in test_ids if candidate in selected
+    ]
+    for key in checkbox_keys[test_id]:
+        st.session_state[key] = test_id in selected
+
+
 config, base_documents, backend = load_resources("config.yaml")
 model_name = getattr(backend, "model", config["llm"]["model"])
 
@@ -433,36 +446,54 @@ with results_tab:
         selection_state_key = f"selected_tests_{pdf_signature}"
         if selection_state_key not in st.session_state:
             st.session_state[selection_state_key] = recommended_ids
-        selected_category = st.selectbox(
-            "Choose a test category",
-            options=list(test_categories),
-            key=f"test_category_{pdf_signature}",
-        )
-        category_test_ids = test_categories[selected_category]
-        category_selection_key = (
-            f"selected_test_ids_{pdf_signature}_{selected_category}"
-        )
-        st.session_state[category_selection_key] = [
-            test_id for test_id in st.session_state[selection_state_key]
-            if test_id in category_test_ids
-        ]
-
-        def save_category_selection():
-            selected = set(st.session_state[selection_state_key])
-            selected.difference_update(category_test_ids)
-            selected.update(st.session_state[category_selection_key])
-            st.session_state[selection_state_key] = [
-                test_id for test_id in test_ids if test_id in selected
+        selected_ids = st.session_state[selection_state_key]
+        checkbox_keys = {
+            test_id: [
+                f"test_picker_{pdf_signature}_{category}_{test_id}"
+                for category, category_test_ids in test_categories.items()
+                if test_id in category_test_ids
             ]
+            for test_id in test_ids
+        }
+        for test_id, keys in checkbox_keys.items():
+            for key in keys:
+                st.session_state[key] = test_id in selected_ids
 
-        selected_ids = st.multiselect(
-            f"Select tests in {selected_category}",
-            options=category_test_ids,
-            format_func=lambda test_id: test_labels.get(test_id, test_id),
-            placeholder="Choose one or more tests",
-            key=category_selection_key,
-            on_change=save_category_selection,
-        )
+        with st.popover(
+            f"Select tests ({len(selected_ids)} selected)",
+            use_container_width=True,
+        ):
+            if recommended_ids:
+                st.caption(
+                    f"{len(recommended_ids)} suggested test(s) are preselected."
+                )
+            for category, category_test_ids in test_categories.items():
+                selected_in_category = sum(
+                    test_id in selected_ids for test_id in category_test_ids
+                )
+                with st.expander(
+                    f"{category} ({selected_in_category}/{len(category_test_ids)})",
+                    expanded=any(
+                        test_id in recommended_ids
+                        for test_id in category_test_ids
+                    ),
+                ):
+                    for test_id in category_test_ids:
+                        checkbox_key = (
+                            f"test_picker_{pdf_signature}_{category}_{test_id}"
+                        )
+                        st.checkbox(
+                            test_labels.get(test_id, test_id),
+                            key=checkbox_key,
+                            on_change=_update_test_selection,
+                            args=(
+                                test_id,
+                                checkbox_key,
+                                test_ids,
+                                selection_state_key,
+                                checkbox_keys,
+                            ),
+                        )
         selected_ids = st.session_state[selection_state_key]
         st.caption(f"{len(selected_ids)} test(s) selected across categories.")
         selected = select_tests(all_tests, selected_ids)

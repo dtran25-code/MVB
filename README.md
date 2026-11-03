@@ -46,8 +46,9 @@ interpretation.
 ### Testing
 
 1. Upload one or more PDFs.
-2. Review the suggested test IDs, choose a category, and select or change tests
-   within that category. Selections are retained when you switch categories.
+2. Open the grouped test selector. Suggested tests are preselected; expand
+   categories to add or remove other tests. Selections stay together across
+   categories.
 3. Choose **Run selected tests**.
 4. Review the PASS, FAIL, and UNCLEAR results, then download the Excel report.
 
