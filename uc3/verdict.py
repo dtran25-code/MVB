@@ -43,7 +43,7 @@ def find_page(quote, doc):
     return None
 
 
-def build_prompt(test, docs, cfg_ret):
+def build_prompt(test, docs, cfg_ret, index=None):
     total = sum(d.chars for d in docs)
     if total <= cfg_ret["full_doc_char_limit"]:
         mode = "full-document"
@@ -51,7 +51,7 @@ def build_prompt(test, docs, cfg_ret):
         shown = {d.code: d.full_text() for d in docs}
     else:
         mode = "retrieval"
-        hits = retrieve(test.text, docs, cfg_ret["top_k"])
+        hits = retrieve(test.text, docs, cfg_ret["top_k"], index=index)
         parts, shown = [], {d.code: "" for d in docs}
         for score, c in hits:
             pg = f"{c.page_start}" if c.page_start == c.page_end else f"{c.page_start}-{c.page_end}"
@@ -77,7 +77,7 @@ def parse_json(raw):
     return None
 
 
-def run_test(test, documents, backend, rules, cfg, as_of, log=None):
+def run_test(test, documents, backend, rules, cfg, as_of, log=None, index=None):
     docs, missing = [], []
     for code in test.codes:
         (docs if code in documents else missing).append(documents[code] if code in documents else code)
@@ -101,7 +101,7 @@ def run_test(test, documents, backend, rules, cfg, as_of, log=None):
         return Result(test.test_id, worst, " ".join(v[1] for v in verdicts), cites, mode="date-check",
                       documents=[d.code for d in docs], review_flag=(worst != "PASS"))
 
-    mode, user, shown = build_prompt(test, docs, cfg["retrieval"])
+    mode, user, shown = build_prompt(test, docs, cfg["retrieval"], index)
     raw = backend.chat(rules, user)
     if log is not None:
         log.write(json.dumps({"test": test.test_id, "mode": mode, "prompt_chars": len(user), "response": raw}) + "\n")

@@ -7,6 +7,7 @@ __pycache__/
 /data/documents/
 /data/tests.xlsx
 /data/answer_key.csv
+/data/chroma_db/
 /output/
 ~$*.xlsx
 

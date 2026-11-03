@@ -77,8 +77,31 @@ class CorpusIndex:
         ]
 
 
-def retrieve(query, docs, top_k):
-    """Top-k chunks PER document, so one document cannot crowd out another."""
+def retrieval_method(cfg):
+    """'tfidf' (default) or 'embedding', from retrieval.method in config.yaml."""
+    method = ((cfg or {}).get("retrieval") or {}).get("method", "tfidf")
+    if method not in ("tfidf", "embedding"):
+        raise ValueError(f"retrieval.method must be 'tfidf' or 'embedding', not {method!r}")
+    return method
+
+
+def make_index(docs, cfg):
+    """Corpus-wide index for the configured method. Both have .retrieve(query, top_k)."""
+    docs = list(docs)
+    if retrieval_method(cfg) == "embedding":
+        from .vectors import VectorIndex
+        return VectorIndex(docs, cfg)
+    return CorpusIndex(docs)
+
+
+def retrieve(query, docs, top_k, index=None):
+    """Top-k chunks PER document, so one document cannot crowd out another.
+
+    With an embedding index (uc3.vectors.VectorIndex) the search runs in Chroma;
+    otherwise each document is ranked with TF-IDF.
+    """
+    if index is not None and hasattr(index, "retrieve_per_document"):
+        return index.retrieve_per_document(query, docs, top_k)
     out = []
     for d in docs:
         hits = rank_chunks(query, d.chunks, top_k)

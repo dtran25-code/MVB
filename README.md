@@ -27,6 +27,7 @@ Run these commands from the project folder (the folder containing `app.py` and
 ```powershell
 python -m pip install -r requirements.txt
 ollama pull llama3.1:8b
+ollama pull nomic-embed-text
 python -m streamlit run app.py
 ```
 
@@ -76,7 +77,13 @@ The default configuration is in `config.yaml`:
 - `tests_file`: `data/tests.xlsx`, the workbook used by the Testing tab and
   command-line runner.
 - `llm`: model backend, name, local Ollama host, and request settings.
-- `retrieval`: passage size and retrieval settings.
+- `retrieval`: passage size and retrieval settings. `method: embedding` searches by
+  meaning (nomic-embed-text vectors in a local Chroma database); `method: tfidf`
+  uses keyword search. If Ollama or the embedding model is unavailable, the app
+  falls back to keyword search and shows a warning.
+- `embedding`: embedding model, Ollama host, and the Chroma folder
+  (`data/chroma_db`). The first run embeds every chunk; later runs embed only new
+  or changed chunks. Delete the folder to rebuild it.
 - `rules_file`: instructions used when evaluating workbook tests.
 - `output_file` and `log_file`: destinations used by the command-line test
   runner.
@@ -109,6 +116,14 @@ python -m uc3.chat_cli --question "How often are access reviews performed?"
 
 # Score results against the answer key
 python -m uc3.score
+
+# Compare keyword and embedding search (no LLM): is the test's document in the top 1/3/5?
+python -m uc3.check_retrieval
+
+# Choose the evidence for a run: whole documents, or top-k chunks by search method
+python -m uc3.run --retrieval full      --output output/results_full.xlsx
+python -m uc3.run --retrieval tfidf     --output output/results_tfidf.xlsx
+python -m uc3.run --retrieval embedding --output output/results_embedding.xlsx
 ```
 
 The mock backend checks application plumbing only; it does not assess factual

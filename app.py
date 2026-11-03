@@ -14,7 +14,7 @@ from uc3.chat import answer_question
 from uc3.documents import load_chunked_documents, load_document, load_documents
 from uc3.llm import make_backend
 from uc3.report import write_results
-from uc3.retrieve import CorpusIndex
+from uc3.retrieve import make_index
 from uc3.run import evaluate_tests, load_rules
 from uc3.sheet import (
     load_sheet,
@@ -405,7 +405,12 @@ with results_tab:
     corpus_signature = _corpus_signature(documents)
     if st.session_state.get("corpus_signature") != corpus_signature:
         with st.spinner("Indexing document passages for search..."):
-            st.session_state.corpus_index = CorpusIndex(documents.values())
+            try:
+                st.session_state.corpus_index = make_index(documents.values(), config)
+            except Exception as error:  # e.g. Ollama not running or embedding model not pulled
+                st.warning(f"Embedding search unavailable ({error}); using keyword (TF-IDF) search.")
+                st.session_state.corpus_index = make_index(
+                    documents.values(), {**config, "retrieval": {**config["retrieval"], "method": "tfidf"}})
             st.session_state.corpus_signature = corpus_signature
 
     workbook_path = Path(config["tests_file"])
@@ -521,6 +526,7 @@ with results_tab:
                         rules,
                         config,
                         as_of,
+                        index=st.session_state.corpus_index,
                     )
                     output_path = upload_root / "latest-results.xlsx"
                     write_results(

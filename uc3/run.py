@@ -6,6 +6,7 @@ import yaml
 
 from .documents import load_documents, load_chunked_documents
 from .llm import make_backend
+from .retrieve import make_index, retrieval_method
 from .report import write_results
 from .sheet import load_sheet, load_tests
 from .verdict import run_test
@@ -15,13 +16,13 @@ def load_rules(path):
     return "\n".join(l for l in Path(path).read_text(encoding="utf8").splitlines() if not l.lstrip().startswith("#"))
 
 
-def evaluate_tests(tests, docs, backend, rules, cfg, as_of, log=None):
+def evaluate_tests(tests, docs, backend, rules, cfg, as_of, log=None, index=None):
     """Evaluate every test and duration, preserving per-test error handling."""
     results, durations = [], []
     for test in tests:
         start = datetime.now()
         try:
-            result = run_test(test, docs, backend, rules, cfg, as_of, log)
+            result = run_test(test, docs, backend, rules, cfg, as_of, log, index)
         except Exception as error:  # one bad test must not stop the run
             from .verdict import Result
             result = Result(
@@ -44,6 +45,9 @@ def main(argv=None):
     ap.add_argument("--model", help="override config model name")
     ap.add_argument("--as-of", help="YYYY-MM-DD, date used for the 12-month check")
     ap.add_argument("--output", help="override output file")
+    ap.add_argument("--retrieval", choices=["full", "tfidf", "embedding"],
+                    help="full = send whole documents; tfidf or embedding = always send the top-k "
+                         "retrieved chunks with that search method (default: config.yaml)")
     a = ap.parse_args(argv)
 
     cfg = yaml.safe_load(open(a.config, encoding="utf8"))
@@ -51,6 +55,11 @@ def main(argv=None):
     if a.model: cfg["llm"]["model"] = a.model
     as_of = date.fromisoformat(a.as_of or cfg.get("as_of_date") or date.today().isoformat())
     out = a.output or cfg["output_file"]
+    if a.retrieval == "full":
+        cfg["retrieval"]["full_doc_char_limit"] = float("inf")
+    elif a.retrieval:
+        cfg["retrieval"]["method"] = a.retrieval
+        cfg["retrieval"]["full_doc_char_limit"] = 0
 
     print(f"Loading documents from {cfg['documents_dir']} ...")
     docs = (load_chunked_documents(cfg["chunks_file"]) if cfg.get("chunks_file")
@@ -65,11 +74,20 @@ def main(argv=None):
     backend = make_backend(cfg["llm"])
     model_name = getattr(backend, "model", cfg["llm"]["model"])
     rules = load_rules(cfg["rules_file"])
+    index = None
+    if retrieval_method(cfg) == "embedding":
+        print("Syncing embeddings with the vector database ...")
+        index = make_index(docs.values(), cfg)
+        print(f"  {len(index.chunks)} chunks indexed ({index.added} newly embedded, {index.removed} removed)")
+    mode_label = ("whole documents" if cfg["retrieval"]["full_doc_char_limit"] == float("inf")
+                  else f"{retrieval_method(cfg)} retrieval when documents exceed "
+                       f"{cfg['retrieval']['full_doc_char_limit']:,} chars")
+    print(f"Evidence: {mode_label}")
     print(f"Running {len(tests)} test(s) with {cfg['llm']['backend']}:{model_name}  (as-of {as_of})\n")
 
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     with open(cfg["log_file"], "w", encoding="utf8") as log:
-        results, durations = evaluate_tests(tests, docs, backend, rules, cfg, as_of, log)
+        results, durations = evaluate_tests(tests, docs, backend, rules, cfg, as_of, log, index)
         for t, r, secs in zip(tests, results, durations):
             flag = " [review]" if r.review_flag else ""
             print(f"{t.test_id:>4}  {r.verdict:<7} {r.mode:<14} {secs:5.1f}s{flag}  {r.reason[:80]}")

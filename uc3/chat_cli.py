@@ -6,7 +6,7 @@ import yaml
 from .chat import answer_question
 from .documents import load_chunked_documents, load_documents
 from .llm import make_backend
-from .retrieve import CorpusIndex
+from .retrieve import make_index
 
 
 def main(argv=None):
@@ -31,7 +31,7 @@ def main(argv=None):
         )
     backend = make_backend(cfg["llm"])
     top_k = cfg["retrieval"]["top_k"]
-    corpus_index = CorpusIndex(documents.values())
+    corpus_index = make_index(documents.values(), cfg)
 
     print(f"Loaded {len(documents)} document(s); model: {getattr(backend, 'model', cfg['llm']['model'])}")
     print("Citations are checked against retrieved text; review answers against the source documents.")

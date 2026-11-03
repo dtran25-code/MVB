@@ -21,6 +21,14 @@ llm:
 
 # ---- Evidence ----
 retrieval:
+  method: embedding                    # embedding (nomic-embed-text + Chroma) | tfidf (keyword search)
   full_doc_char_limit: 24000           # if all of a test's documents fit under this, send them whole
   top_k: 5                             # otherwise retrieve this many chunks per document
   chunk_max_chars: 1500
+
+# ---- Embeddings (used when retrieval.method is embedding) ----
+embedding:
+  model: nomic-embed-text              # run once: ollama pull nomic-embed-text
+  host: http://localhost:11434
+  db_dir: data/chroma_db               # local Chroma vector database; rebuilt automatically if deleted
+  timeout_seconds: 120
